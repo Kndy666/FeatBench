@@ -1,0 +1,61 @@
+[common]
+# GitHub API configuration
+github_token = "YOUR_GITHUB_TOKEN_HERE"
+github_api_base = "https://api.github.com"
+
+# OpenAI API configuration
+openai_api_key = "YOUR_OPENAI_API_KEY_HERE"
+openai_model = ""
+openai_base_url = ""
+
+# Output directory configuration
+output_dir = "output"
+
+# Crawl mode configuration
+crawl_mode = "stars"  # "stars" or "specified"
+crawl_json_file = "crawl.json"
+
+[release_collector]
+# Filtering thresholds
+min_stars_range = 5000
+default_release_limit = 30
+min_releases = 5
+min_release_body_length = 50
+min_release_date = "2024-06-01"
+rank_start = 100
+rank_end = 200
+
+# Excluded topics
+excluded_topics = ["tutorial", "beginner", "example", "course", "boilerplate", "book", "awesome", "books", "education", "learning", "demo", "starter", "guide"]
+
+# Test case related configuration
+test_directories = ["test", "tests", "testing", "spec", "specs"]
+test_file_patterns = ["test_.*\\.py$", ".*_test\\.py$", ".*_spec\\.py$", "conftest\\.py$"]
+bot_users = ["github-actions[bot]", "dependabot[bot]", "renovate[bot]", "greenkeeper[bot]"]
+
+# Cache file
+cache_file = "processed_repos_cache.json"
+
+[release_analyzer]
+# Cache file
+analysis_cache_file = "release_analysis_cache.json"
+
+# README processing configuration
+max_readme_length = 2000
+readme_truncation_suffix = "...(truncated)"
+
+[pr_analyzer]
+# Cache file  
+pr_analysis_cache_file = "pr_analysis_cache.json"
+
+# File change summary configuration
+max_files_in_summary = 50
+max_patch_length = 1000
+max_patch_preview_length = 600
+
+[main]
+# Final results file
+final_results_file = "final_analysis_results.json"
+
+# Print parameters
+sample_results_limit = 5

@@ -1,0 +1,5 @@
+docker>=6.1
+openai>=1.40
+requests>=2.31
+toml>=0.10
+tqdm>=4.66

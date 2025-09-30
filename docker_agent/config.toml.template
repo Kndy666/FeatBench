@@ -1,0 +1,186 @@
+[logging]
+level = "INFO"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+log_file = "logs/docker_agent.log"
+
+[proxy]
+enabled = true
+http_proxy = "http://127.0.0.1:58591"
+https_proxy = "http://127.0.0.1:58591"
+
+[docker]
+timeout = 180
+
+[paths]
+analysis_file = "analysis_results.json"
+
+[execution]
+max_specs_per_repo = 100
+default_python_version = "3.9"
+
+[trae]
+trajectory_timestamp_format = "%Y%m%d_%H%M%S"
+
+[files]
+setup_files_list = "setup_files_list.json"
+recommended_python_version = "recommended_python_version.json"
+
+[prompts.file_list]
+template = """
+Please analyze the project {repo_name} and perform two tasks:
+
+TASK 1: List the most relevant files(no more than 20) for setting up a development environment, including:
+0. CI/CD configuration files (such as .github/workflows/*.yml, .gitlab-ci.yml, .travis.yml, Jenkinsfile, etc.)
+1. README files
+2. Documentation files  
+3. Installation guides
+4. Development setup guides
+5. Requirements and dependency files (requirements.txt, setup.py, pyproject.toml, Pipfile, etc.)
+6. Configuration files (.python-version, .nvmrc, Dockerfile, docker-compose.yml, etc.)
+
+Save the file list to a JSON file named "{setup_files}" in the project root directory.
+Format the file list as a JSON array where each element is a string containing the relative path (relative to project root).
+Example format: ["README.md", "requirements.txt", "setup.py", ".github/workflows/ci.yml"]
+
+IMPORTANT: You MUST strictly save the file list using the exact filename "{setup_files}" as required. Do NOT use any other filename.
+
+TASK 2: Analyze the configuration files you found and determine the most appropriate Python version for this project.
+Based on your analysis, save the recommended Python version to a text file named "{version_file}" in the project root directory.
+The file should contain ONLY the version number in the format "3.xx" (e.g., "3.8", "3.9", "3.10", "3.11").
+
+IMPORTANT: You MUST strictly save the Python version using the exact filename "{version_file}" as required. Do NOT use any other filename.
+
+If no specific version requirements are found, use "{default_version}" as the default.
+
+IMPORTANT: The {version_file} file must contain ONLY the version number, no comments, no explanations, no additional text.
+
+Focus only on identifying files and determining the Python version. Do not attempt to configure the environment yet.
+"""
+
+[prompts.env_setup]
+template = """
+Please help me configure the runtime environment for this project.
+The project is {repo_name}.
+
+MANDATORY FIRST STEP
+First, read the **{setup_files}** file in the project root to understand which configuration files are available.
+DO NOT PROCEED WITHOUT READING THIS FILE FIRST!
+Then analyze these files to understand the project structure, dependencies, and requirements.
+
+TEST REQUIREMENTS
+You need to verify if it can successfully run the tests of the project.
+You can tolerate a few test cases failures—as long as most tests pass, it's good enough.
+Your test command must output detailed pass/fail status for each test item. This is mandatory. For example, with pytest, use the -rA option to get output like:
+PASSED tests/test_resources.py::test_fetch_centromeres
+PASSED tests/test_vis.py::test_to_ucsc_colorstring
+
+**IMPORTANT:** Always use '--tb=short' to avoid excessive traceback output. Before running any tests, you MUST attempt to install 'pytest-timeout' and 'pytest-xdist', and ALWAYS add '--timeout=5' and '-n auto' to your pytest command to prevent any single test case from running too long and to speed up testing by running tests in parallel.
+
+**IMPORTANT:** You must additionally test {test_files}. If these specific tests fail due to ImportError or ModuleNotFound, you should make every effort to install all optional dependencies. For other test files, you may tolerate ImportError or ModuleNotFound errors.
+
+PYTHON VERSION INFORMATION
+**IMPORTANT: About Python versions in this container:**
+- The container has been pre-configured with the optimal Python version for this specific project 
+- **IMPORTANT** The Python version specified in the {version_file} is already installed in the system. You can use 'python3.x' to run the project directly (e.g., python3.11)
+- DO NOT attempt to install or change Python versions - the correct version is already installed in the system
+
+PREFERRED INSTALLATION METHOD
+- Always check which Python environment you're targeting before installation
+
+**PRIORITY 1: Try using UV or poetry first (recommended)**
+- Use 'uv' for dependency management and installation when possible
+- For projects with pyproject.toml: try 'uv sync' or 'uv install'
+- For projects with requirements.txt: try 'uv pip install -r requirements.txt'
+- For editable installation: try 'uv pip install -e .'
+- For running tests: try 'uv run pytest' or similar commands
+- **IMPORTANT**: If you use uv to install dependencies, you MUST add the --exclude-newer {created_time} argument, for example: 'uv pip install -r requirements.txt --exclude-newer {created_time}'
+- **IMPORTANT**: Ensure uv is using the system Python, not the agent's Python environment
+
+**PRIORITY 2: Fallback to traditional tools if UV fails**
+- If UV doesn't work or encounters issues, fall back to pip3
+- Use system pip3: check with 'which pip3' to verify location
+- Install necessary dependencies using system pip3
+- If the project needs to be installed as a package, use 'pip3 install -e .'
+- If you use pip to install dependencies, since pip cannot specify a cutoff date, you may encounter dependency version conflicts. In such cases, you need to manually resolve the conflicts according to the project's timeline. The cut-off time is {created_time}.
+- **IMPORTANT**: Verify you're using system pip3, not agent's pip
+
+Set up the correct Python environment and ensure all required packages are installed so that the test files can run properly.
+Focus on resolving any import errors, missing dependencies, or configuration issues.
+
+IMPORTANT: 
+1. This Docker container may have been used to configure environments for the same project before.
+2. UV is already installed in the container and configured with Tsinghua mirror for faster downloads.
+3. If you encounter any testing-related errors (such as 'collected 0 items', 'no tests found', 'skip', 'INTERNALERROR', 
+'TypeError: could not get code object', or other pytest framework internal issues), please ignore these errors and focus 
+on environment configuration instead. These errors may indicate that test files don't exist, don't contain valid tests, 
+or are pytest framework internal issues. In such cases, abandon trying to fix specific test files and continue with 
+dependency installation and environment configuration.
+4. Install all dependencies to the system Python, not in any virtual environment.
+5. This Docker container may have been used to configure environments for the same project before.
+Please first check what packages are already installed in the system Python environment to avoid conflicts.
+"""
+
+[evaluation]
+default_timeout = 1800
+max_instances_per_repo = 100
+results_dir = "logs/evaluation_results"
+
+[agents]
+config_file = "agent_configs.json"
+agentless_file = "data/processed_evaluation_results_agentless.jsonl"
+
+[dockerfile]
+template = """
+FROM {base_image}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+RUN \\
+    echo ">>> Detecting system type and changing mirror source..."; \\
+    if [ -f /etc/apt/sources.list ]; then \\
+        if grep -q "ubuntu" /etc/apt/sources.list; then \\
+            echo ">>> Ubuntu system detected, changing to Tsinghua University Ubuntu mirror..."; \\
+            sed -i 's@http://archive.ubuntu.com/ubuntu/@https://mirrors.tuna.tsinghua.edu.cn/ubuntu/@g' /etc/apt/sources.list; \\
+            sed -i 's@http://security.ubuntu.com/ubuntu/@https://mirrors.tuna.tsinghua.edu.cn/ubuntu/@g' /etc/apt/sources.list; \\
+        elif grep -q "debian" /etc/apt/sources.list; then \\
+            echo ">>> Debian system detected, changing to Tsinghua University Debian mirror..."; \\
+            sed -i 's@http://deb.debian.org/debian@https://mirrors.tuna.tsinghua.edu.cn/debian@g' /etc/apt/sources.list; \\
+            sed -i 's@http://security.debian.org/debian-security@https://mirrors.tuna.tsinghua.edu.cn/debian-security@g' /etc/apt/sources.list; \\
+            sed -i 's@http://ftp.debian.org/debian@https://mirrors.tuna.tsinghua.edu.cn/debian@g' /etc/apt/sources.list; \\
+        fi; \\
+    fi; \\
+    \\
+    echo ">>> Updating package list with new source..."; \\
+    apt-get update && \\
+    \\
+    echo ">>> Installing SSH Server, sudo, git and other common tools..."; \\
+    apt-get install -y \\
+        openssh-server \\
+        sudo \\
+        git \\
+        build-essential \\
+        curl \\
+        htop \\
+        nano \\
+        cmake \\
+        software-properties-common \\
+    && rm -rf /var/lib/apt/lists/*;
+
+RUN \\
+    mkdir -p /root/.pip && \\
+    printf "[global]\\nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple\\n" > /root/.pip/pip.conf;
+
+RUN \\
+    mkdir -p /root/.config/uv && printf '[[index]]\\nurl = "https://pypi.tuna.tsinghua.edu.cn/simple"\\ndefault = true' > /root/.config/uv/uv.toml
+
+RUN \
+    mkdir /workdir && pip install uv; \
+    git clone https://github.com/bytedance/trae-agent.git /workdir/trae-agent;
+
+RUN cd /workdir/trae-agent && uv sync --all-extras
+
+COPY {agent_prompt} /workdir/trae-agent/trae_agent/prompt/agent_prompt.py
+
+RUN sed -i 's/_timeout: float = 120\\.0/_timeout: float = 600.0/g' /workdir/trae-agent/trae_agent/tools/bash_tool.py
+"""
