@@ -6,7 +6,8 @@ from typing import Dict, Any, Optional, List
 
 from docker_agent.agents.base import BaseAgent
 from docker_agent.agents.trae_agent import TraeAgent
-from docker_agent.agents.agentless import Agentless
+from docker_agent.agents.oracle_agent import OracleAgent
+# from docker_agent.agents.agentless import Agentless
 from docker_agent.core.exceptions import ConfigurationError
 
 
@@ -25,8 +26,10 @@ class AgentManager:
 
         if agent_name == "trae-agent":
             return TraeAgent(self.container, self.agent_config)
+        elif agent_name == "oracle":
+            return OracleAgent(self.container, self.agent_config)
         elif agent_name == "agentless":
-            return Agentless(self.container, self.agent_config)
+            raise NotImplementedError("Agentless evaluation is not included")
         else:
             raise ConfigurationError(f"Unsupported agent type: {self.agent_config.name}")
 
@@ -42,6 +45,9 @@ class AgentManager:
             self.agent.setup()
 
             operator.checkout_commit(spec.base_commit, use_docker=True)
+            if isinstance(self.agent, OracleAgent):
+                self.agent.spec_patch = spec.patch
+
             agent_success, agent_output = self.agent.run(
                 spec.problem_statement,
                 spec.instance_id,
