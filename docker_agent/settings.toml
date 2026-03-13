@@ -4,7 +4,7 @@ format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 log_file = "logs/docker_agent.log"
 
 # Path configuration
-analysis_file = "final_analysis_results_transformed.json"
+analysis_file = "../dataset/featbench_v1_0.json"
 
 # Execution configuration
 max_specs_per_repo = 100
