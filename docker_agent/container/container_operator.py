@@ -160,6 +160,50 @@ class ContainerOperator:
         self.logger.info(f"Test directories detected recursively: {found}")
         return found
 
+    def _setup_conan_cmake_env(self, repo_name: str) -> None:
+        """Prepare the cmake environment expected by conan's test/conftest.py.
+
+        Conan's conftest.py has hardcoded Linux paths per cmake version. This:
+        1. Symlinks the system cmake binary to all configured paths so any-version tests pass.
+        2. Installs cmake 3.15.7 (the default version in conftest.py) if not already present,
+           so version-checking tests pass. Skipped entirely if the sentinel file exists.
+        """
+        sentinel = "/usr/share/cmake-3.15.7/.conan_setup_done"
+        cmake_315_bin = "/usr/share/cmake-3.15.7/bin"
+        script = (
+            f"if [ -f {sentinel} ]; then exit 0; fi && "
+            # Capture the current system cmake (before potentially installing 3.15)
+            "cmake_bin=$(which cmake 2>/dev/null) && "
+            "[ -n \"$cmake_bin\" ] && "
+            # Symlink system cmake to all configured paths except the 3.15 path
+            "python3 -c \""
+            "import re; "
+            "f=open('test/conftest.py'); c=f.read(); f.close(); "
+            "paths=re.findall(r\\\"'Linux': ['\\\\\\\"]([^'\\\\\\\"]+)['\\\\\\\"]\\\", c); "
+            "print('\\\\n'.join(paths))"
+            f"\" | while read path; do "
+            f"[ \"$path\" != \"$(dirname $cmake_bin)\" ] && [ \"$path\" != \"{cmake_315_bin}\" ] && mkdir -p \"$path\" && ln -sf \"$cmake_bin\" \"$path/cmake\"; "
+            "done && "
+            # Install cmake 3.15.7 only if system cmake is not already 3.15.x
+            "cmake_ver=$(cmake --version 2>/dev/null | head -1) && "
+            "if ! echo \"$cmake_ver\" | grep -q 'cmake version 3\\.15'; then "
+            "  wget -q https://cmake.org/files/v3.15/cmake-3.15.7-Linux-x86_64.sh -O /tmp/cmake-3.15.sh && "
+            "  chmod +x /tmp/cmake-3.15.sh && "
+            "  /tmp/cmake-3.15.sh --prefix=/usr/local --skip-license && "
+            f"  mkdir -p {cmake_315_bin} && "
+            f"  ln -sf /usr/local/bin/cmake {cmake_315_bin}/cmake; "
+            "else "
+            f"  mkdir -p {cmake_315_bin} && ln -sf \"$cmake_bin\" \"{cmake_315_bin}/cmake\"; "
+            "fi && "
+            f"touch {sentinel}"
+        )
+        workdir = f"/workdir/swap/{repo_name}"
+        exit_code, output = self.docker_executor.execute(script, workdir, tty=False, timeout=120)
+        if exit_code != 0:
+            self.logger.warning(f"conan cmake env setup failed (non-fatal): {output}")
+        else:
+            self.logger.info("conan cmake env set up successfully")
+
     def run_tests_in_container(
         self,
         repo_name: str,
@@ -168,6 +212,9 @@ class ContainerOperator:
         use_xdist: bool = True
     ) -> tuple[Set[str], str]:
         """Run tests in container and return passed test files and logs"""
+        if repo_name == "conan":
+            self._setup_conan_cmake_env(repo_name)
+
         pytest_args = []
 
         if test_files is None:
