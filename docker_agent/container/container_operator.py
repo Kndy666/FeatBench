@@ -59,6 +59,8 @@ class ContainerOperator:
 
     def checkout_commit(self, commit_hash: str, exclude_file: List[str] = None, use_docker=True) -> None:
         """Switch to specified commit"""
+        self.repo_clone(use_docker=use_docker)
+        
         self.logger.info(f"Forcibly switching to commit: {commit_hash}")
         if exclude_file is None:
             exclude_file = []
