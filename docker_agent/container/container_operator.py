@@ -204,6 +204,29 @@ class ContainerOperator:
         else:
             self.logger.info("conan cmake env set up successfully")
 
+    def _setup_tox_env(self, repo_name: str) -> None:
+        """Prepare tox repository test environment by installing package in editable mode.
+
+        Uses a sentinel file to skip re-running the install if it has already
+        been completed in this container.
+        """
+        sentinel = "/tmp/.tox_env_setup_done"
+        check_exit, _ = self.docker_executor.execute(f"test -f {sentinel}", "/", tty=False, timeout=10)
+        if check_exit == 0:
+            self.logger.info("tox env already set up (sentinel exists), skipping")
+            return
+
+        self.logger.info("Setting up tox env with editable install")
+        cmd = f"pip install -e . && touch {sentinel}"
+        exit_code, output = self.docker_executor.execute(cmd, f"/workdir/swap/{repo_name}", tty=False, timeout=300)
+        if exit_code != 0:
+            self.logger.error(f"tox env setup failed: {output}")
+            raise ContainerOperationError(
+                f"tox env setup failed: {output}",
+                container_id=self.container.id if self.container else None,
+            )
+        self.logger.info("tox env set up successfully")
+
     def run_tests_in_container(
         self,
         repo_name: str,
@@ -214,6 +237,8 @@ class ContainerOperator:
         """Run tests in container and return passed test files and logs"""
         if repo_name == "conan":
             self._setup_conan_cmake_env(repo_name)
+        if repo_name == "tox":
+            self._setup_tox_env(repo_name)
 
         pytest_args = []
 
