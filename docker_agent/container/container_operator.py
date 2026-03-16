@@ -236,7 +236,7 @@ class ContainerOperator:
             else:
                 pytest_args.extend(test_files)
 
-        base_cmd_template = "python3 -m pytest -q -rA --tb=no -p no:pretty --timeout=5 --continue-on-collection-errors"
+        base_cmd_template = "python3 -m pytest -q -rA --tb=no -p no:pretty --timeout=60 --continue-on-collection-errors"
         if use_xdist:
             base_cmd_template = f"{base_cmd_template} --timeout-method=thread -n auto"
         else:
