@@ -5,7 +5,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from docker_agent.core.types import Container, Spec
+from docker_agent.core.types import Container
 from docker_agent.parsing.patch_analyzer import PatchAnalyzer
 from docker_agent.utils.command_executor import DockerCommandExecutor
 from docker_agent.core.exceptions import AgentSetupError
@@ -56,19 +56,13 @@ class BaseAgent:
         pass
 
     @abstractmethod
-    def evaluate(self, spec: Spec, operator, *args, **kwargs) -> Dict[str, Any]:
-        """
-        Evaluate agent on a specific spec - must be implemented by subclass (clone or copy)
+    def run(self, problem_statement: str, instance_id: str, repo_name: str) -> tuple[bool, str]:
+        """Run agent to solve problem - must be implemented by subclass"""
+        pass
 
-        Args:
-            spec: Evaluation specification
-            operator: ContainerOperator instance
-            *args: Additional positional arguments
-            **kwargs: Additional keyword arguments
-
-        Returns:
-            Evaluation result dictionary
-        """
+    @abstractmethod
+    def parse_agent_log(self, log: str) -> Dict[str, Optional[int]]:
+        """Parse agent log to extract token usage - must be implemented by subclass"""
         pass
 
     @abstractmethod

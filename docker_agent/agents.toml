@@ -10,6 +10,10 @@ branch = "main"
 install_command = "uv sync --all-extras"
 
 [[agents]]
+name = "oracle"
+model = "oracle"
+
+[[agents]]
 name = "agentless"
 model = "deepseek-chat"
 provider = "deepseek"
