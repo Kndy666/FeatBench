@@ -246,6 +246,7 @@ class ContainerOperator:
             dirs = self._find_test_dirs(repo_name, use_docker=True)
             for d in dirs:
                 pytest_args.append(f"{d}/")
+                expected_tests = pytest_args
         else:
             if isinstance(test_files[0], Dict):
                 for test_file in test_files:
@@ -258,8 +259,16 @@ class ContainerOperator:
                             elif change.code_type == 'method':
                                 class_name, method_name = change.name.split('.', 1)
                                 pytest_args.append(f"{file_name}::{class_name}::{method_name}")
+                expected_tests = pytest_args
             else:
-                pytest_args.extend(test_files)
+                # Running individual tests could lead to failed tests
+                # we collect the unique test files and run them entirely to get more stable results,
+                # then get the status for the individual expected tests from the pytest output
+                # the above cases are not used anymore and should probably be removed in the future,
+                # but we keep them for now to avoid unexpected issues
+                tests_files_union = {t.split("::")[0] for t in test_files}
+                pytest_args.extend(list(tests_files_union))
+                expected_tests = test_files
 
         base_cmd_template = "python3 -m pytest -q -rA --tb=no -p no:pretty --timeout=60 --continue-on-collection-errors"
         if use_xdist:
@@ -279,7 +288,7 @@ class ContainerOperator:
         exit_code, output = self.docker_executor.execute(
             cmd, f"/workdir/swap/{repo_name}", stream=True, tty=True, timeout=1200
         )
-        matched_files = self.parse_pytest_output(output, pytest_args, expected_statuses)
+        matched_files = self.parse_pytest_output(output, expected_tests, expected_statuses)
         return matched_files, output
 
     def _run_tests_in_batches(self, repo_name: str, pytest_args: List[str], base_cmd_template: str, expected_statuses: Optional[List[TestStatus]] = None) -> tuple[Set[str], str]:
