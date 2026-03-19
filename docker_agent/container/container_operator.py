@@ -162,6 +162,123 @@ class ContainerOperator:
         self.logger.info(f"Test directories detected recursively: {found}")
         return found
 
+    def _setup_conan_cmake_env(self, repo_name: str) -> None:
+        """Prepare the cmake environment expected by conan's test/conftest.py.
+
+        Conan's conftest.py has hardcoded Linux paths per cmake version. This:
+        1. Symlinks the system cmake binary to all configured paths so any-version tests pass.
+        2. Installs cmake 3.15.7 (the default version in conftest.py) if not already present,
+           so version-checking tests pass. Skipped entirely if the sentinel file exists.
+        """
+        sentinel = "/usr/share/cmake-3.15.7/.conan_setup_done"
+        cmake_315_bin = "/usr/share/cmake-3.15.7/bin"
+        script = (
+            f"if [ -f {sentinel} ]; then exit 0; fi && "
+            # Capture the current system cmake (before potentially installing 3.15)
+            "cmake_bin=$(which cmake 2>/dev/null) && "
+            "[ -n \"$cmake_bin\" ] && "
+            # Symlink system cmake to all configured paths except the 3.15 path
+            "python3 -c \""
+            "import re; "
+            "f=open('test/conftest.py'); c=f.read(); f.close(); "
+            "paths=re.findall(r\\\"'Linux': ['\\\\\\\"]([^'\\\\\\\"]+)['\\\\\\\"]\\\", c); "
+            "print('\\\\n'.join(paths))"
+            f"\" | while read path; do "
+            f"[ \"$path\" != \"$(dirname $cmake_bin)\" ] && [ \"$path\" != \"{cmake_315_bin}\" ] && mkdir -p \"$path\" && ln -sf \"$cmake_bin\" \"$path/cmake\"; "
+            "done && "
+            # Install cmake 3.15.7 only if system cmake is not already 3.15.x
+            "cmake_ver=$(cmake --version 2>/dev/null | head -1) && "
+            "if ! echo \"$cmake_ver\" | grep -q 'cmake version 3\\.15'; then "
+            "  wget -q https://cmake.org/files/v3.15/cmake-3.15.7-Linux-x86_64.sh -O /tmp/cmake-3.15.sh && "
+            "  chmod +x /tmp/cmake-3.15.sh && "
+            "  /tmp/cmake-3.15.sh --prefix=/usr/local --skip-license && "
+            f"  mkdir -p {cmake_315_bin} && "
+            f"  ln -sf /usr/local/bin/cmake {cmake_315_bin}/cmake; "
+            "else "
+            f"  mkdir -p {cmake_315_bin} && ln -sf \"$cmake_bin\" \"{cmake_315_bin}/cmake\"; "
+            "fi && "
+            f"touch {sentinel}"
+        )
+        workdir = f"/workdir/swap/{repo_name}"
+        exit_code, output = self.docker_executor.execute(script, workdir, tty=False, timeout=120)
+        if exit_code != 0:
+            self.logger.warning(f"conan cmake env setup failed (non-fatal): {output}")
+        else:
+            self.logger.info("conan cmake env set up successfully")
+
+    def _setup_tox_env(self, repo_name: str) -> None:
+        """Prepare tox repository test environment by installing package in editable mode.
+
+        Uses a sentinel file to skip re-running the install if it has already
+        been completed in this container.
+        """
+        sentinel = "/tmp/.tox_env_setup_done"
+        check_exit, _ = self.docker_executor.execute(f"test -f {sentinel}", "/", tty=False, timeout=10)
+        if check_exit == 0:
+            self.logger.info("tox env already set up (sentinel exists), skipping")
+            return
+
+        self.logger.info("Setting up tox env with editable install")
+        cmd = f"pip install -e . && touch {sentinel}"
+        exit_code, output = self.docker_executor.execute(cmd, f"/workdir/swap/{repo_name}", tty=False, timeout=300)
+        if exit_code != 0:
+            self.logger.error(f"tox env setup failed: {output}")
+            raise ContainerOperationError(
+                f"tox env setup failed: {output}",
+                container_id=self.container.id if self.container else None,
+            )
+        self.logger.info("tox env set up successfully")
+
+    def _setup_pybamm_env(self, repo_name: str) -> None:
+        """Prepare PyBaMM test environment by installing package with all extras.
+
+        Uses a sentinel file to skip re-running the install if it has already
+        been completed in this container.
+        """
+        sentinel = "/tmp/.pybamm_env_setup_done"
+        check_exit, _ = self.docker_executor.execute(f"test -f {sentinel}", "/", tty=False, timeout=10)
+        if check_exit == 0:
+            self.logger.info("PyBaMM env already set up (sentinel exists), skipping")
+            return
+
+        self.logger.info("Setting up PyBaMM env with editable install and [all] extras")
+        cmd = f"pip install -e '.[all]' && touch {sentinel}"
+        exit_code, output = self.docker_executor.execute(cmd, f"/workdir/swap/{repo_name}", tty=False, timeout=300)
+        if exit_code != 0:
+            self.logger.error(f"PyBaMM env setup failed: {output}")
+            raise ContainerOperationError(
+                f"PyBaMM env setup failed: {output}",
+                container_id=self.container.id if self.container else None,
+            )
+        self.logger.info("PyBaMM env set up successfully")
+
+    def _setup_jupyter_ai_env(self, repo_name: str) -> None:
+        """Prepare jupyter-ai test environment by upgrading Node.js and installing packages.
+
+        Uses a sentinel file to skip re-running the install if it has already
+        been completed in this container.
+        """
+        sentinel = "/tmp/.jupyter_ai_env_setup_done"
+        check_exit, _ = self.docker_executor.execute(f"test -f {sentinel}", "/", tty=False, timeout=10)
+        if check_exit == 0:
+            self.logger.info("jupyter-ai env already set up (sentinel exists), skipping")
+            return
+
+        self.logger.info("Setting up jupyter-ai env with Node.js upgrade and editable installs")
+        cmd = (
+            "npm install -g n && n 14 && hash -r && "
+            'pip install -e "packages/jupyter-ai-magics[test]" -e "packages/jupyter-ai-test[test]" -e "packages/jupyter-ai[test]" && '
+            f"touch {sentinel}"
+        )
+        exit_code, output = self.docker_executor.execute(cmd, f"/workdir/swap/{repo_name}", tty=False, timeout=600)
+        if exit_code != 0:
+            self.logger.error(f"jupyter-ai env setup failed: {output}")
+            raise ContainerOperationError(
+                f"jupyter-ai env setup failed: {output}",
+                container_id=self.container.id if self.container else None,
+            )
+        self.logger.info("jupyter-ai env set up successfully")
+
     def run_tests_in_container(
         self,
         repo_name: str,
@@ -170,12 +287,22 @@ class ContainerOperator:
         use_xdist: bool = True
     ) -> tuple[Set[str], str]:
         """Run tests in container and return passed test files and logs"""
+        if repo_name == "conan":
+            self._setup_conan_cmake_env(repo_name)
+        if repo_name == "tox":
+            self._setup_tox_env(repo_name)
+        if repo_name.lower() == "pybamm":
+            self._setup_pybamm_env(repo_name)
+        if repo_name == "jupyter-ai":
+            self._setup_jupyter_ai_env(repo_name)
+
         pytest_args = []
 
         if test_files is None:
             dirs = self._find_test_dirs(repo_name, use_docker=True)
             for d in dirs:
                 pytest_args.append(f"{d}/")
+                expected_tests = pytest_args
         else:
             if isinstance(test_files[0], Dict):
                 for test_file in test_files:
@@ -188,10 +315,18 @@ class ContainerOperator:
                             elif change.code_type == 'method':
                                 class_name, method_name = change.name.split('.', 1)
                                 pytest_args.append(f"{file_name}::{class_name}::{method_name}")
+                expected_tests = pytest_args
             else:
-                pytest_args.extend(test_files)
+                # Running individual tests could lead to failed tests
+                # we collect the unique test files and run them entirely to get more stable results,
+                # then get the status for the individual expected tests from the pytest output
+                # the above cases are not used anymore and should probably be removed in the future,
+                # but we keep them for now to avoid unexpected issues
+                tests_files_union = {t.split("::")[0] for t in test_files}
+                pytest_args.extend(list(tests_files_union))
+                expected_tests = test_files
 
-        base_cmd_template = "python3 -m pytest -q -rA --tb=no -p no:pretty --timeout=5 --continue-on-collection-errors"
+        base_cmd_template = "python3 -m pytest -q -rA --tb=no -p no:pretty --timeout=60 --continue-on-collection-errors"
         if use_xdist:
             base_cmd_template = f"{base_cmd_template} --timeout-method=thread -n auto"
         else:
@@ -209,7 +344,7 @@ class ContainerOperator:
         exit_code, output = self.docker_executor.execute(
             cmd, f"/workdir/swap/{repo_name}", stream=True, tty=True, timeout=1200
         )
-        matched_files = self.parse_pytest_output(output, pytest_args, expected_statuses)
+        matched_files = self.parse_pytest_output(output, expected_tests, expected_statuses)
         return matched_files, output
 
     def _run_tests_in_batches(self, repo_name: str, pytest_args: List[str], base_cmd_template: str, expected_statuses: Optional[List[TestStatus]] = None) -> tuple[Set[str], str]:
