@@ -227,6 +227,56 @@ class ContainerOperator:
             )
         self.logger.info("tox env set up successfully")
 
+    def _setup_pybamm_env(self, repo_name: str) -> None:
+        """Prepare PyBaMM test environment by installing package with all extras.
+
+        Uses a sentinel file to skip re-running the install if it has already
+        been completed in this container.
+        """
+        sentinel = "/tmp/.pybamm_env_setup_done"
+        check_exit, _ = self.docker_executor.execute(f"test -f {sentinel}", "/", tty=False, timeout=10)
+        if check_exit == 0:
+            self.logger.info("PyBaMM env already set up (sentinel exists), skipping")
+            return
+
+        self.logger.info("Setting up PyBaMM env with editable install and [all] extras")
+        cmd = f"pip install -e '.[all]' && touch {sentinel}"
+        exit_code, output = self.docker_executor.execute(cmd, f"/workdir/swap/{repo_name}", tty=False, timeout=300)
+        if exit_code != 0:
+            self.logger.error(f"PyBaMM env setup failed: {output}")
+            raise ContainerOperationError(
+                f"PyBaMM env setup failed: {output}",
+                container_id=self.container.id if self.container else None,
+            )
+        self.logger.info("PyBaMM env set up successfully")
+
+    def _setup_jupyter_ai_env(self, repo_name: str) -> None:
+        """Prepare jupyter-ai test environment by upgrading Node.js and installing packages.
+
+        Uses a sentinel file to skip re-running the install if it has already
+        been completed in this container.
+        """
+        sentinel = "/tmp/.jupyter_ai_env_setup_done"
+        check_exit, _ = self.docker_executor.execute(f"test -f {sentinel}", "/", tty=False, timeout=10)
+        if check_exit == 0:
+            self.logger.info("jupyter-ai env already set up (sentinel exists), skipping")
+            return
+
+        self.logger.info("Setting up jupyter-ai env with Node.js upgrade and editable installs")
+        cmd = (
+            "npm install -g n && n 14 && hash -r && "
+            'pip install -e "packages/jupyter-ai-magics[test]" -e "packages/jupyter-ai-test[test]" -e "packages/jupyter-ai[test]" && '
+            f"touch {sentinel}"
+        )
+        exit_code, output = self.docker_executor.execute(cmd, f"/workdir/swap/{repo_name}", tty=False, timeout=600)
+        if exit_code != 0:
+            self.logger.error(f"jupyter-ai env setup failed: {output}")
+            raise ContainerOperationError(
+                f"jupyter-ai env setup failed: {output}",
+                container_id=self.container.id if self.container else None,
+            )
+        self.logger.info("jupyter-ai env set up successfully")
+
     def run_tests_in_container(
         self,
         repo_name: str,
@@ -239,6 +289,10 @@ class ContainerOperator:
             self._setup_conan_cmake_env(repo_name)
         if repo_name == "tox":
             self._setup_tox_env(repo_name)
+        if repo_name.lower() == "pybamm":
+            self._setup_pybamm_env(repo_name)
+        if repo_name == "jupyter-ai":
+            self._setup_jupyter_ai_env(repo_name)
 
         pytest_args = []
 
